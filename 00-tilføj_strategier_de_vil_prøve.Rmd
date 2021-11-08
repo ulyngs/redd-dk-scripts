@@ -1,0 +1,207 @@
+---
+output: html_document
+params:
+  consent: "data-raw/test_redd_dk_consent.csv"
+  workshop-times: "data-raw/test_workshop_time.csv"
+  exit-survey: "data-raw/test_reDD_EXIT_survey.csv"
+---
+
+
+# Read in the data
+```{r}
+library(tidyverse)
+library(writexl)
+
+dir.create("data-processed")
+dir.create("data-raw")
+
+consent_survey <- read_csv(params$consent) %>% 
+  filter(!is.na(ended)) %>% 
+  select(participant_id = participant_identifier, signature, email)
+
+workshop_times <- read_csv(params$`workshop-times`) %>% 
+  select(participant_id = participant_identifier, workshop_times_start)
+
+exit_survey <- read_csv(params$`exit-survey`) %>% 
+  left_join(consent_survey) %>% 
+  left_join(workshop_times)
+
+```
+
+# Augment and store
+```{r}
+long_info_to_add <- exit_survey %>% 
+  as_tibble() %>% 
+  filter(!is.na(ended), !is.na(participant_id)) %>% 
+  select(participant_id, 
+         commit_strategy_types_block:confidence) %>% 
+  mutate(across(everything(), as.character)) %>% 
+  pivot_longer(-participant_id) %>% 
+  filter(!is.na(value),
+         value != "")
+
+structured_info_to_add <- long_info_to_add %>% 
+  mutate(type = case_when(
+    str_detect(name, "commit") ~ "commit",
+    str_detect(name, "how") ~ "how",
+    str_detect(name, "devices") ~ "devices"
+  )) %>% 
+  rowwise() %>% 
+  mutate(value = case_when(
+    str_detect(name, "commit_") | str_detect(name, "devices_") ~ str_split(value, ","),
+    TRUE ~ list(value)
+  )) %>% 
+  unnest() %>% 
+  group_by(participant_id, type) %>% 
+  mutate(strategy_num = row_number()) %>% 
+  arrange(participant_id, type, strategy_num) %>% 
+  ungroup() %>% 
+  mutate(value = str_trim(value))
+
+labels_and_strategies <- tribble(
+  ~label, ~strategy_text,
+  "apply_block_app",   "Blokér distraherende websites eller apps",
+  "apply_block_reduce",   "Reducér din teknologi til det du behøver",
+  "apply_block_hide",   "Fjern distraherende ting på hjemmesider",
+  "apply_block_focus", "Brug fokus-tilstand",
+  "apply_block_notifications", "Begræns notifikationer",
+  "apply_track_understand", "Forstå hvordan du bruger din teknologi",
+  "apply_track_timer", "Fokusér i intervaller med en timer",
+  "apply_goal_motivation", "Sæt motiverende citater eller to-do's på nye tabs",
+  "apply_goal_todo", "Erstat distraktioner på nettet med din to-do liste",
+  "apply_goal_redirect", "Send dig selv videre fra distraherende websites",
+  "apply_reward_reward", "Beløn eller straf dig selv",
+  "apply_reward_grayscale", "Gå i sort-hvid",
+  "apply_reward_move", "Flyt distraherende apps ud af syne",
+  "apply_reward_time_pressure", "Skriv under tidspres",
+  "apply_apply_other", "En anden strategi"
+)
+
+```
+
+## Create functions
+```{r}
+get_commitment <- function(a_participant_id, commitment_num){
+  # check if participant id exists
+  participant_id_exists <- any(structured_info_to_add$participant_id == a_participant_id)
+  
+  if(!participant_id_exists) return(NA_character_)
+  
+  # check if they have that number strategy
+  strategies_chosen <- structured_info_to_add %>% 
+    filter(participant_id == a_participant_id,
+           str_detect(name, "commit_")) %>% 
+      pull(strategy_num)
+  
+  has_number <- commitment_num %in% strategies_chosen
+  
+  if(!has_number) return(NA_character_)
+  
+  structured_info_to_add %>% 
+      filter(participant_id == a_participant_id,
+             type == "commit",
+             strategy_num == commitment_num) %>% 
+      pull(value) 
+}
+
+get_application_details <- function(a_participant_id, strategy, details_prefix){
+  # check if there is a strategy at all
+  if (is.na(strategy)) return(NA_character_)
+  
+  # check if participant id exists
+  participant_id_exists <- any(structured_info_to_add$participant_id == a_participant_id)
+  if(!participant_id_exists) return(NA_character_)
+  
+  strategy <- str_trim(strategy)
+  
+  # check if they have that strategy
+  has_strategy <- structured_info_to_add %>% 
+    filter(participant_id == a_participant_id) %>% 
+    pull(value) %>% 
+    any(strategy == .)
+  
+  if(!has_strategy) return(NA_character_)
+  
+  strategy_label <- labels_and_strategies %>% 
+    filter(strategy_text == strategy) %>% 
+    pull(label)
+  
+  result <- structured_info_to_add %>% 
+    filter(participant_id == a_participant_id,
+           name == str_c(details_prefix, strategy_label)) %>% 
+    pull(value)
+  
+  if (length(result) > 1) {
+    result %>% 
+      str_trim() %>% 
+      knitr::combine_words() %>% 
+      as.character()
+  } else if (length(result) == 0) {
+    return(NA_character_)
+  } else {
+    result
+  }
+}
+
+```
+
+## Add and store
+```{r}
+participants_to_include <- exit_survey %>% 
+  select(participant_id, first_name = signature, email, workshop_times_start) %>% 
+  mutate(first_name = word(first_name)) %>% 
+  filter(!is.na(participant_id))
+
+with_commitment_added <- participants_to_include %>% 
+  rowwise() %>% 
+  mutate(first_strategy = get_commitment(participant_id, 1),
+         second_strategy = get_commitment(participant_id, 2),
+         third_strategy = get_commitment(participant_id, 3),
+         fourth_strategy = get_commitment(participant_id, 4),
+         fifth_strategy = get_commitment(participant_id, 5),
+         sixth_strategy = get_commitment(participant_id, 6),
+         seventh_strategy = get_commitment(participant_id, 7),
+         eigth_strategy = get_commitment(participant_id, 8),
+         nineth_strategy = get_commitment(participant_id, 9),
+         tenth_strategy = get_commitment(participant_id, 10)) %>% 
+  mutate(first_strategy_apply = get_application_details(participant_id, first_strategy, "how_"),
+         first_strategy_devices = get_application_details(participant_id, first_strategy, "devices_"),
+         second_strategy_apply = get_application_details(participant_id, second_strategy, "how_"),
+         second_strategy_devices = get_application_details(participant_id, second_strategy, "devices_"),
+         third_strategy_apply = get_application_details(participant_id, third_strategy, "how_"),
+         third_strategy_devices = get_application_details(participant_id, third_strategy, "devices_"),
+         fourth_strategy_apply = get_application_details(participant_id, fourth_strategy, "how_"),
+         fourth_strategy_devices = get_application_details(participant_id, fourth_strategy, "devices_"),
+         fifth_strategy_apply = get_application_details(participant_id, fifth_strategy, "how_"),
+         fifth_strategy_devices = get_application_details(participant_id, fifth_strategy, "devices_"),
+         sixth_strategy_apply = get_application_details(participant_id, sixth_strategy, "how_"),
+         sixth_strategy_devices = get_application_details(participant_id, sixth_strategy, "devices_"),
+         seventh_strategy_apply = get_application_details(participant_id, seventh_strategy, "how_"),
+         seventh_strategy_devices = get_application_details(participant_id, seventh_strategy, "devices_"),
+         eigth_strategy_apply = get_application_details(participant_id, eigth_strategy, "how_"),
+         eigth_strategy_devices = get_application_details(participant_id, eigth_strategy, "devices_"),
+         tenth_strategy_apply = get_application_details(participant_id, tenth_strategy, "how_"),
+         tenth_strategy_devices = get_application_details(participant_id, tenth_strategy, "devices_")
+         )
+
+```
+
+
+## Process for the email
+```{r}
+workshop_links <- read_excel("workshop_times.xlsx") %>% 
+  select(workshop_times_start = survey_option, miro_link)
+
+for_the_email <- with_commitment_added %>% 
+  mutate(across(ends_with("_apply"), ~str_c('ved at "', ., '"')),
+         across(ends_with("_devices"), ~case_when(
+           !str_detect(., "other") & !is.na(.) ~ str_c('på din/e *', ., '*'), 
+           is.na(.) ~ "",
+           TRUE ~ ""))) %>% 
+  left_join(workshop_links)
+
+for_the_email %>% 
+  writexl::write_xlsx("data-processed/email-info.xlsx")
+```
+
+

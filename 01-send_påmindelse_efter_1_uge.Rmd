@@ -1,0 +1,220 @@
+---
+output: html_document
+params:
+  deltagere: "data-processed/test_elever_med_strategier.xlsx"
+  email-username: "ulrngs"
+  email-outgoing-server: "smtp.cs.ox.ac.uk"
+  email-port: 465
+---
+
+# Load libraries and read in data
+```{r setup, include=FALSE}
+library(blastula)
+library(tidyverse)
+library(glue)
+library(readxl)
+
+workshop_links <- read_excel("workshop_times.xlsx") %>% 
+  select(workshop_times_start = survey_option, miro_link)
+
+deltagere <- read_excel(params$deltagere) %>% 
+  mutate(across(ends_with("_apply"), ~str_c('by "', ., '"')),
+         across(ends_with("_devices"), ~case_when(
+           !str_detect(., "other") & !is.na(.) ~ str_c('på din/e *', ., '*'), 
+           is.na(.) ~ "",
+           TRUE ~ ""))) %>% 
+  mutate(first_name = word(signature)) %>% 
+  left_join(workshop_links)
+
+```
+
+
+# Create the email
+## 1 week after: Commitment reminder mail
+```{r}
+send_commitment_reminder <- function(first_name, 
+                                     miro_link, 
+                                     email, 
+                                     first_strategy = NA, 
+                                     first_strategy_apply = "", 
+                                     first_strategy_devices = "", 
+                                     second_strategy = NA, 
+                                     second_strategy_apply = "", 
+                                     second_strategy_devices = "", 
+                                     third_strategy = NA, 
+                                     third_strategy_apply = "", 
+                                     third_strategy_devices = "", 
+                                     fourth_strategy = NA, 
+                                     fourth_strategy_apply = "", 
+                                     fourth_strategy_devices = "",
+                                     fifth_strategy = NA, 
+                                     fifth_strategy_apply = "", 
+                                     fifth_strategy_devices = "",
+                                     sixth_strategy = NA, 
+                                     sixth_strategy_apply = "", 
+                                     sixth_strategy_devices = "",
+                                     seventh_strategy = NA, 
+                                     seventh_strategy_apply = "", 
+                                     seventh_strategy_devices = "",
+                                     eigth_strategy = NA, 
+                                     eigth_strategy_apply = "", 
+                                     eigth_strategy_devices = "",
+                                     nineth_strategy = NA, 
+                                     nineth_strategy_apply = "", 
+                                     nineth_strategy_devices = "",
+                                     tenth_strategy = NA, 
+                                     tenth_strategy_apply = "", 
+                                     tenth_strategy_devices = ""){
+  
+  # first name should be blank if we ain't got no name
+  if(is.na(first_name)){
+    first_name <- ","
+  } else {
+    first_name <- str_c(first_name, ",")
+  }
+  
+  
+  if(!is.na(first_strategy)){
+    first_strategy_line <- glue('- **{first_strategy}** {first_strategy_apply} {first_strategy_devices}')
+  second_strategy_line <- if_else(!is.na(second_strategy),
+                                  glue('- **{second_strategy}** {second_strategy_apply} {second_strategy_devices}'),
+                                  "")
+  third_strategy_line <- if_else(!is.na(third_strategy),
+                                 glue('- **{third_strategy}** {third_strategy_apply} {third_strategy_devices}'),
+                                 "")
+  fourth_strategy_line <- if_else(!is.na(fourth_strategy),
+                                  glue('- **{fourth_strategy}** {fourth_strategy_apply} {fourth_strategy_devices}'),
+                                  "")
+  fifth_strategy_line <- if_else(!is.na(fifth_strategy),
+                                  glue('- **{fifth_strategy}** {fifth_strategy_apply} {fifth_strategy_devices}'),
+                                  "")
+  sixth_strategy_line <- if_else(!is.na(sixth_strategy),
+                                  glue('- **{sixth_strategy}** {sixth_strategy_apply} {sixth_strategy_devices}'),
+                                  "")
+  seventh_strategy_line <- if_else(!is.na(seventh_strategy),
+                                  glue('- **{seventh_strategy}** {seventh_strategy_apply} {seventh_strategy_devices}'),
+                                  "")
+  eigth_strategy_line <- if_else(!is.na(eigth_strategy),
+                                  glue('- **{eigth_strategy}** {eigth_strategy_apply} {eigth_strategy_devices}'),
+                                  "")
+  nineth_strategy_line <- if_else(!is.na(nineth_strategy),
+                                  glue('- **{nineth_strategy}** {nineth_strategy_apply} {nineth_strategy_devices}'),
+                                  "")
+  tenth_strategy_line <- if_else(!is.na(tenth_strategy),
+                                  glue('- **{tenth_strategy}** {tenth_strategy_apply} {tenth_strategy_devices}'),
+                                  "")
+  
+  email_content <- compose_email(
+    body = md(
+      glue("
+Hej {first_name}
+
+Tak for din deltagelse i sidste uges Reducing Digital Distraction-workshop!
+
+Her er en påmindelse om, at du ville prøve disse strategier:
+
+<br> 
+
+{first_strategy_line}
+{second_strategy_line}
+{third_strategy_line}
+{fourth_strategy_line}
+{fifth_strategy_line}
+{sixth_strategy_line}
+{seventh_strategy_line}
+{eigth_strategy_line}
+{nineth_strategy_line}
+{tenth_strategy_line}
+
+<br>
+
+For at minde dig om hvordan du kan anvende strategierne, se [vores ReDD website](https://redd-project.org/da/strategies/).
+
+Hvis du gerne vil minde dig selv om hvad vi lavede, kan du kigge på [miro boardet]({miro_link}).
+
+Om nogle uger checker vi ind med dig, om det du prøvede viste sig at være nyttigt. &#128522;
+
+<br>
+
+Bedste hilsner,
+
+Ulrik & Helene
+"
+      )
+    ),
+footer = md(
+  glue("
+Copenhagen Center for Social Data Science,
+Københavns Universitet
+&       
+Department of Computer Science,
+University of Oxford
+       ")
+  )
+)
+    
+  } else {
+    
+    email_content <- compose_email(
+    body = md(
+      glue("
+Hej {first_name},
+
+Tak for din deltagelse i sidste uges Reducing Digital Distraction-workshop!
+
+Glem ikke at at afprøve de strategier du var interesseret i.
+Du kan minde dig selv om hvad vi levede ved at
+
+- kigge på [miro boardet]({miro_link}) fra workshoppen
+- gennemse strategierne på [vores ReDD website](https://redd-project.org/da/strategies/).
+
+Om nogle uger checker vi ind med dig, om det du prøvede viste sig at være nyttigt. &#128522;
+
+<br>
+
+Bedste hilsner,
+
+Ulrik & Helene
+"
+      )
+    ),
+footer = md(
+  glue("
+Copenhagen Center for Social Data Science,
+Københavns Universitet
+&       
+Department of Computer Science,
+University of Oxford
+       ")
+  )
+)
+    
+  }
+  
+  print(str_c("Sending to ", email))
+  
+  email_content %>% 
+    smtp_send(
+      from = c("Ulrik Lyngs, Dept. of Computer Science" = "ulrik.lyngs@cs.ox.ac.uk"),
+      to = email,
+      subject = glue("ReDD workshop: påmindelse om hvad du ville prøve"),
+      credentials = creds(user = params$`email-username`,
+                          host = params$`email-outgoing-server`,
+                          port = params$`email-port`,
+                          use_ssl = TRUE)
+    )
+  
+  Sys.sleep(1)
+}
+
+```
+
+
+# Send them out
+## 7 days after: Commitment reminder email
+```{r}
+deltagere %>% 
+  select(first_name, miro_link, email, first_strategy:tenth_strategy_devices) %>% 
+  pwalk(send_commitment_reminder)
+
+```
